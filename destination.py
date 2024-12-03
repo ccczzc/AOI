@@ -3,7 +3,7 @@ import os
 import socket
 import threading
 import time
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 from collections import defaultdict
 from sensor import Sensor, SensorData
 
@@ -17,6 +17,7 @@ class SourceState:
         self.time_received_packets: list[float] = []
         self.time_period: str = 0.5
         self.output_fd = output_fd
+        self.clock_offset: float = 0.0  # Added clock offset
 
     def update_weight(self):
         now_timestamp = time.time()
@@ -55,12 +56,14 @@ class WiFreshDestination:
             self.sources_state[source_address] = SourceState(output_fd=open(source_file_path, 'a'))
         self.last_poll_time = time.time() - self.poll_interval  # 上次轮询时间
         self.lock: threading.Lock = threading.Lock()  # 定义锁
+        self.clock_offsets: Dict[Tuple[str, int], float] = {}
+        self.sync_rounds = 10  # Number of synchronization rounds
 
 
     def start(self):
+        self.clock_synchronization()
         threading.Thread(target=self.poll_sources, daemon=True).start()
         threading.Thread(target=self.receive_response, daemon=True).start()
-        # threading.Thread(target=self.clock_synchronization, daemon=True).start()
         print("WiFresh destination started")
         self.record_age()
 
@@ -103,31 +106,28 @@ class WiFreshDestination:
             self.last_poll_time = current_time
             source = self.sources_state[source_addr]
             source.time_poll_packets.append(current_time)
-        print(f"Sent POLL to source {source_addr}")
+        # print(f"Sent POLL to source {source_addr}")
 
     def receive_response(self):
         while True:
             data, addr = self.sock.recvfrom(1024)
-            print(f"Received data from {addr}: {data.decode()}")
-            source_id = addr
-            if data.decode().startswith('TIME_RESPONSE'):
-                self.process_time_response(data.decode(), source_id)
-            else:
-                self.process_fragment(data.decode(), source_id)
+            if addr not in self.sources_state:
+                print(f"Received data from unknown source {addr}: {data.decode()}")
+                exit(1)
+            # print(f"Received data from {addr}: {data.decode()}")
+            self.process_fragment(data.decode(), addr)
 
-    def process_time_response(self, response, source_id):
-        pass
-
-    def process_fragment(self, fragment: str, source_id):
+    def process_fragment(self, fragment: str, source_addr):
         fresh_fragment = SensorData.from_str(fragment)
-        print(f"Received fragment from source {source_id}: {fresh_fragment}")
+        # print(f"Received fragment from source {source_addr}: {fresh_fragment}")
         with self.lock:
-            source = self.sources_state[source_id]
+            source = self.sources_state[source_addr]
             source.fragments.append(fresh_fragment.data)
             if fresh_fragment.is_fragmented == 0:
                 complete_message = ''.join(source.fragments)
                 source.reset_fragments()
-                print(f"Received complete message from source {source_id}: {complete_message}")
+                # print(f"Received complete message from source {source_addr}: {complete_message}")
+                fresh_fragment.timestamp -= source.clock_offset # 校正时间戳
                 if source.last_systime_received < fresh_fragment.timestamp:
                     source.last_systime_received = fresh_fragment.timestamp
                 time_received = time.time()
@@ -137,11 +137,31 @@ class WiFreshDestination:
 
 
     def clock_synchronization(self):
-        # while True:
-        #     for source_id in self.sources_state.keys():
-        #         self.sock.sendto(b'TIME_SYNC', ('localhost', source_id))
-        #     time.sleep(3600)  # 每小时同步一次
-        pass
+        for source_addr in self.sources_state.keys():
+            offsets = []
+            for _ in range(self.sync_rounds):
+                try:
+                    self.sock.sendto(b'TIME_SYNC', source_addr)
+                    send_time = time.time()
+                    self.sock.settimeout(2)
+                    data, addr = self.sock.recvfrom(1024)
+                    recv_time = time.time()
+                    print(f"Received TIME_RESPONSE from {addr}: {data.decode()}")
+                    if addr == source_addr and data.decode().startswith('TIME_RESPONSE'):
+                        parts = data.decode().split(':')
+                        if len(parts) == 2:
+                            source_time = float(parts[1])
+                            RTT = recv_time - send_time
+                            offset = (source_time + RTT / 2) - recv_time
+                            offsets.append(offset)
+                            print(f"Received TIME_RESPONSE from {source_addr}: offset={offset}")
+                except socket.timeout:
+                    print(f"Clock synchronization with {source_addr} timed out.")
+            if offsets:
+                average_offset = sum(offsets) / len(offsets)
+                self.sources_state[source_addr].clock_offset = average_offset
+                print(f"Average clock offset for {source_addr}: {average_offset} seconds")
+        self.sock.settimeout(None)
 
 if __name__ == '__main__':
     sources_addresses=[('10.0.0.2', 8000)]

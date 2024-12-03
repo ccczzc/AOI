@@ -43,7 +43,7 @@ def myNetwork():
     net.addLink(sta1, ap1)
     net.addLink(ap1, h1)
 
-    net.plotGraph(max_x=1000, max_y=1000)
+    # net.plotGraph(max_x=1000, max_y=1000)
 
     info( '*** Starting network\n')
     net.build()
