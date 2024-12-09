@@ -11,9 +11,10 @@ from mn_wifi.cli import CLI
 from mn_wifi.link import wmediumd
 from mn_wifi.wmediumdConnector import interference
 from subprocess import call
+import random
+import math
 
-
-def myNetwork():
+def myNetwork(num_sources=10):
 
     net = Mininet_wifi(link=wmediumd,
                        wmediumd_mode=interference,
@@ -27,13 +28,23 @@ def myNetwork():
                            port=6653)
 
     info( '*** Add switches/APs\n')
+    ap1_x, ap1_y = 50.0, 50.0
     ap1 = net.addAccessPoint('ap1', ssid='ap1-ssid', mode='g', channel='1',
-                              position='50.0,50.0,0')
+                              position=f'{ap1_x},{ap1_y},0')
 
     info( '*** Add hosts/stations\n')
-    h1 = net.addHost('h1', cls=Host, ip='10.0.0.1', defaultRoute=None)
-    sta1 = net.addStation('sta1', ip='10.0.0.2',
-                           position='52.5,50.0,0')
+    destination = net.addHost('dst', cls=Host, ip='10.0.0.1', defaultRoute=None)
+    sources = []
+    for i in range(num_sources):
+        # 随机生成距离和角度
+        r = random.uniform(2, 3)
+        theta = random.uniform(0, 2 * math.pi)
+        # 计算 source 的位置
+        x = ap1_x + r * math.cos(theta)
+        y = ap1_y + r * math.sin(theta)
+        source = net.addStation(f'src{i + 1}', ip=f'10.0.0.{i+2}',
+                             position=f'{x},{y},0')
+        sources.append(source)
 
     info("*** Configuring Propagation Model\n")
     net.setPropagationModel(model="logDistance", exp=4.5)
@@ -42,10 +53,10 @@ def myNetwork():
     net.configureWifiNodes()
 
     info( '*** Add links\n')
-    # sta1ap1 = {'delay':'50ms','loss':5,'max_queue_size':1000}
-    net.addLink(sta1, ap1)
-    ap1h1 = {} #{'bw':10,'delay':'3ms','loss':1,'max_queue_size':10000000}
-    net.addLink(ap1, h1, cls=TCLink , **ap1h1)
+    for source in sources:
+        net.addLink(source, ap1)
+    ap1dst = {} #{'bw':10,'delay':'3ms','loss':1,'max_queue_size':10000000}
+    net.addLink(ap1, destination, cls=TCLink , **ap1dst)
 
     # net.plotGraph(max_x=100, max_y=100)
 
@@ -61,6 +72,7 @@ def myNetwork():
     ap1.cmd('ovs-ofctl add-flow ap1 "in_port=1,actions=output:2"')
     ap1.cmd('ovs-ofctl add-flow ap1 "in_port=2,actions=output:1"')
 
+
     info('*** Running pingall\n')
     sleep(1)
     net.pingAll()
@@ -68,8 +80,15 @@ def myNetwork():
     info('*** Post configure nodes\n')
     info('*** Opening terminals and running commands\n')
     sleep(5)  # 等待10秒
-    makeTerm(sta1, cmd='timeout 11m python3 source.py 8000 10.0.0.1 9999')
-    makeTerm(h1, cmd='timeout 10m python3 destination.py --source 10.0.0.2:8000')
+    # sta1.sendCmd('timeout 11m python3 source.py 8000 10.0.0.1 9999')
+    # h1.sendCmd('timeout 10m python3 destination.py')
+    sources_addresses = []
+    for i, source in enumerate(sources):
+        listen_port = 8000 + i
+        ip = source.IP()
+        sources_addresses.append(f"{ip}:{listen_port}")
+        makeTerm(source, cmd=f'timeout 11m python3 source_wifi.py {listen_port} 10.0.0.1 9999')
+    makeTerm(destination, cmd='timeout 10m python3 destination_wifi.py --sources ' + ' '.join(sources_addresses))
     info('*** Running CLI\n')
     CLI(net)
     net.stop()

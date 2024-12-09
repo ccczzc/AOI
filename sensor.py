@@ -25,11 +25,14 @@ class SensorData:
         fragmented_str = data_str[:2]
         timestamp_str = data_str[2:20]
         data = data_str[20:]
-        # 解析 is_fragmented
-        is_fragmented = int(fragmented_str)
-        # 解析 timestamp
-        timestamp = float(timestamp_str)
-        return SensorData(is_fragmented, timestamp, data)
+        try:
+            # 解析 is_fragmented
+            is_fragmented = int(fragmented_str)
+            # 解析 timestamp
+            timestamp = float(timestamp_str)
+            return SensorData(is_fragmented, timestamp, data)
+        except ValueError:
+            return None
     
     def __str__(self):
         return f"SensorData(is_fragmented={self.is_fragmented}, timestamp={self.timestamp}, data={self.data})"
