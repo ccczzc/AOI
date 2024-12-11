@@ -7,6 +7,7 @@ import time
 from typing import Dict, List, Tuple
 from collections import defaultdict
 from sensor import SensorData
+import bisect
 
 class SourceState:
     def __init__(self, output_fd: TextIOWrapper):
@@ -21,19 +22,18 @@ class SourceState:
 
     def update_weight(self):
         now_timestamp = time.time()
-        # Remove outdated poll packets
-        while self.time_poll_packets:
-            time_poll = self.time_poll_packets[0]
-            if now_timestamp - time_poll > self.time_period:
-                self.time_poll_packets.pop(0)
-            else:
-                break
-        while self.time_received_packets:
-            time_received = self.time_received_packets[0]
-            if now_timestamp - time_received > self.time_period:
-                self.time_received_packets.pop(0)
-            else:
-                break
+        
+        # Define expiration time
+        expired_time = now_timestamp - self.time_period
+        
+        # Update time_poll_packets queue
+        index = bisect.bisect_right(self.time_poll_packets, expired_time)
+        self.time_poll_packets = self.time_poll_packets[index:]
+        
+        # Update time_received_packets queue
+        index = bisect.bisect_right(self.time_received_packets, expired_time)
+        self.time_received_packets = self.time_received_packets[index:]
+        
         p = (len(self.time_received_packets) + 1) / (len(self.time_poll_packets) + 1)
         potential_age_reduction = now_timestamp - self.last_systime_received - self.approximate_systime_HOL
         self.weight = p * potential_age_reduction * potential_age_reduction
@@ -46,7 +46,7 @@ class WiFreshDestination:
         self, 
         sources_addresses: List[Tuple[str, int]], 
         listen_port=9999, 
-        age_record_dir='./ages_multisource',
+        age_record_dir='./ages_multisource_wifresh_app',
         poll_interval=0.3,
         age_record_interval=1e-4
     ):
