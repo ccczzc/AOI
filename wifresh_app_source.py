@@ -5,7 +5,15 @@ import sys
 import select
 
 class WiFreshSource:
-    def __init__(self, listen_port, destination_address):
+    def __init__(
+        self, 
+        listen_port, 
+        destination_address,
+        generation_rate=7000,
+        sync_interval=5,
+        sync_rounds=5,
+        clock_offset_alpha=0.02
+    ):
         self.listen_port = listen_port
         self.destination_address = destination_address
         self.lcfs_queue: list[SensorData] = []  # LCFS queue
@@ -15,12 +23,12 @@ class WiFreshSource:
         self.max_packet_size = self.get_max_packet_size() - self.packet_header_size  # Max packet size
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(('0.0.0.0', self.listen_port))
-        self.generation_rate = 7000  # Generation rate
+        self.generation_rate = generation_rate  # Generation rate
         self.clock_offset = 0.0  # Clock offset between source and destination
-        self.sync_interval = 5  # Clock synchronization interval in seconds
+        self.sync_interval = sync_interval  # Clock synchronization interval in seconds
         self.last_sync_time = time.time()
-        self.sync_rounds = 5  # Number of synchronization messages per sync
-        self.alpha = 0.02  # Smoothing factor for clock offset adjustment (0 < alpha <= 1)
+        self.sync_rounds = sync_rounds  # Number of synchronization messages per sync
+        self.clock_offset_alpha = clock_offset_alpha  # Smoothing factor for clock offset adjustment (0 < alpha <= 1)
 
     def get_max_packet_size(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -30,10 +38,7 @@ class WiFreshSource:
         return max_packet_size
 
     def start(self):
-        print(f"WiFresh source started on port {self.listen_port}")
-        self.run()
-
-    def run(self):
+        print(f"WiFresh APP source started on port {self.listen_port}")
         self.sock.setblocking(False)
         start_transmission = False
         last_generation_time = time.time()
@@ -62,7 +67,7 @@ class WiFreshSource:
                         t2 = time.time()
                         offset = dest_time - ((t1 + t2) / 2)
                         # Update clock offset using exponential moving average
-                        self.clock_offset = self.alpha * offset + (1 - self.alpha) * self.clock_offset
+                        self.clock_offset = self.clock_offset_alpha * offset + (1 - self.clock_offset_alpha) * self.clock_offset
                         print(f"Updated clock offset: {self.clock_offset} seconds")
                 else:
                     print(f"Received unknown message from {addr}: {data_str}")

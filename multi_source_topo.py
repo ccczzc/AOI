@@ -87,8 +87,8 @@ def myNetwork(num_sources=10):
         listen_port = 8000 + i
         ip = source.IP()
         sources_addresses.append(f"{ip}:{listen_port}")
-        makeTerm(source, cmd=f'timeout 11m python3 source_wifi.py {listen_port} 10.0.0.1 9999')
-    makeTerm(destination, cmd='timeout 10m python3 destination_wifi.py --sources ' + ' '.join(sources_addresses))
+        makeTerm(source, cmd=f'timeout 11m python3 wifresh_app_source.py {listen_port} 10.0.0.1 9999')
+    makeTerm(destination, cmd='timeout 10m python3 wifresh_app_destination.py --sources ' + ' '.join(sources_addresses))
     info('*** Running CLI\n')
     CLI(net)
     net.stop()
