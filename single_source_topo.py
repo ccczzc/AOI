@@ -69,7 +69,7 @@ def myNetwork():
     info('*** Opening terminals and running commands\n')
     sleep(5)  # 等待10秒
     makeTerm(sta1, cmd='timeout 11m python3 wifresh_app_source.py 8000 10.0.0.1 9999')
-    makeTerm(h1, cmd='timeout 10m python3 wifresh_app_destination.py --source 10.0.0.2:8000')
+    makeTerm(h1, cmd='timeout 10m python3 wifresh_app_destination.py --source 10.0.0.2:8000:1')
     info('*** Running CLI\n')
     CLI(net)
     net.stop()

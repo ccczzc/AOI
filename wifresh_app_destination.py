@@ -6,7 +6,7 @@ import socket
 import time
 from typing import Dict, List, Tuple
 from collections import defaultdict
-from sensor import SensorData
+from sensor import SensorData, DataType
 import bisect
 
 class SourceState:
@@ -14,7 +14,7 @@ class SourceState:
         self.weight: float = 0
         self.last_systime_received: float = time.time()
         self.approximate_systime_HOL: float = 0
-        self.fragments: list[str] = []
+        self.fragments: bytes = b''
         self.time_poll_packets: list[float] = []
         self.time_received_packets: list[float] = []
         self.time_period: str = 0.5
@@ -44,9 +44,9 @@ class SourceState:
 class WiFreshDestination:
     def __init__(
         self, 
-        sources_addresses: List[Tuple[str, int]], 
+        sources_addresses: List[Tuple[str, int, DataType]], 
         listen_port=9999, 
-        age_record_dir='./ages_multisource_wifresh_app',
+        age_record_dir='./ages_wifresh_app',
         poll_interval=0.3,
         age_record_interval=1e-4
     ):
@@ -54,7 +54,7 @@ class WiFreshDestination:
         self.sock.bind(('0.0.0.0', listen_port))
         self.poll_interval = poll_interval  # Polling interval
         self.age_record_interval = age_record_interval  # Age record interval
-        self.sources_state: dict[Tuple[str, int], SourceState] = defaultdict(SourceState)
+        self.sources_state: dict[Tuple[str, int, DataType], SourceState] = defaultdict(SourceState)
         os.makedirs(age_record_dir, exist_ok=True)
         for source_address in sources_addresses:
             source_file_path = os.path.join(age_record_dir, f"{source_address[0]}_{source_address[1]}.txt")
@@ -95,44 +95,46 @@ class WiFreshDestination:
         selected_source = max(self.sources_state, key=lambda k: self.sources_state[k].weight, default=None)
         return selected_source
 
-    def send_poll(self, source_addr):
-        self.sock.sendto(b'POLL', source_addr)
-        print(f"Sent POLL to {source_addr}")
+    def send_poll(self, source_tuple):
+        ip, port, data_type = source_tuple
+        self.sock.sendto(f"POLL:{data_type.value}".encode(), (ip, port))
+        # print(f"Sent POLL to {source_tuple}")
         current_time = time.time()
         self.last_poll_time = current_time
-        source = self.sources_state[source_addr]
+        source = self.sources_state[source_tuple]
         source.time_poll_packets.append(current_time)
 
     def receive_response(self):
         readable, _, _ = select.select([self.sock], [], [], 0)
         if readable:
-            data, addr = self.sock.recvfrom(4096)
-            if addr not in self.sources_state:
-                print(f"Received data from unknown source {addr}: {data.decode()}")
-                exit(1)
-            data_str = data.decode()
-            # print(f"Received data from {addr}: {data_str}")
-            if data_str.startswith('TIME_REQUEST'):
-                parts = data_str.split(':')
-                if len(parts) == 2:
-                    source_time = float(parts[1])
-                    # Handle time synchronization request
-                    current_time = time.time()
-                    response = f"TIME_RESPONSE:{current_time:010.15f}:{source_time:010.15f}"
-                    self.sock.sendto(response.encode(), addr)
-                    print(f"Sent TIME_RESPONSE to {addr}: {current_time}")
+            data_bytes, addr = self.sock.recvfrom(4096)
+            # if addr not in self.sources_state:
+            #     print(f"Received data from unknown source {addr}: {data_bytes.decode()}")
+            #     exit(1)
+            data_structed = SensorData.from_bytes(data_bytes)
+            # print(f"Received data from {addr}: {data_structed}")
+            if data_structed.data_type == DataType.TIME_REQUEST:
+                source_time = data_structed.timestamp
+                # Handle time synchronization request
+                current_time = time.time()
+                response = f"TIME_RESPONSE:{current_time:010.15f}:{source_time:010.15f}"
+                self.sock.sendto(response.encode(), addr)
+                print(f"Sent TIME_RESPONSE to {addr}: {current_time}")
             else:
-                self.process_fragment(data_str, addr)
+                # Assuming the type can be inferred from the data_structed
+                source_type = data_structed.data_type
+                addr_with_type = (addr[0], addr[1], source_type)
+                self.process_fragment(data_structed, addr_with_type)
 
-    def process_fragment(self, fragment: str, source_addr):
-        fresh_fragment = SensorData.from_str(fragment)
+    def process_fragment(self, fresh_fragment: SensorData, source_addr):
         if fresh_fragment is None:
             return
         source = self.sources_state[source_addr]
-        source.fragments.append(fresh_fragment.data)
+        source.fragments += fresh_fragment.data
         if fresh_fragment.is_fragmented == 0:
-            complete_message = ''.join(source.fragments)
+            # complete_message = source.fragments
             source.reset_fragments()
+            fresh_fragment.timestamp = max(fresh_fragment.timestamp, time.time())
             if source.last_systime_received < fresh_fragment.timestamp:
                 source.last_systime_received = fresh_fragment.timestamp
                 time_received = time.time()
@@ -149,11 +151,11 @@ if __name__ == '__main__':
     sources_addresses = []
     if args.sources:
         for src in args.sources:
-            ip, port = src.split(':')
-            sources_addresses.append((ip, int(port)))
+            ip, port, type = src.split(':')
+            sources_addresses.append((ip, int(port), DataType(int(type))))
     else:
         print("No sources specified")
-        print("Usage: python destination.py --sources <ip:port> <ip:port> ...")
+        print("Usage: python destination.py --sources <ip:port:type> <ip:port:type> ...")
         exit(1)
 
     destination = WiFreshDestination(sources_addresses=sources_addresses)
