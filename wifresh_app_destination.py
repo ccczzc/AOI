@@ -57,7 +57,7 @@ class WiFreshDestination:
         self.sources_state: dict[Tuple[str, int, DataType], SourceState] = defaultdict(SourceState)
         os.makedirs(age_record_dir, exist_ok=True)
         for source_address in sources_addresses:
-            source_file_path = os.path.join(age_record_dir, f"{source_address[0]}_{source_address[1]}.txt")
+            source_file_path = os.path.join(age_record_dir, f"{source_address[0]}_{source_address[1]}_{source_address[2]}.txt")
             with open(source_file_path, 'w'):
                 # Open file in write mode to clear contents
                 pass
@@ -145,18 +145,24 @@ class WiFreshDestination:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Start WiFreshDestination')
-    parser.add_argument('--sources', nargs='+', help='List of source addresses in the format ip:port')
+    parser.add_argument('--sources', nargs='+', help='List of source addresses in the format ip:port:type')
+    parser.add_argument('--listen_port', type=int, default=9999, help='Port to listen on')
+    parser.add_argument('--age_record_dir', default='./ages_wifresh_app', help='Directory to store age records')
     args = parser.parse_args()
 
     sources_addresses = []
     if args.sources:
         for src in args.sources:
             ip, port, type = src.split(':')
-            sources_addresses.append((ip, int(port), DataType(int(type))))
+            sources_addresses.append((ip, int(port), DataType[type.upper()]))
     else:
         print("No sources specified")
         print("Usage: python destination.py --sources <ip:port:type> <ip:port:type> ...")
         exit(1)
 
-    destination = WiFreshDestination(sources_addresses=sources_addresses)
+    destination = WiFreshDestination(
+        sources_addresses=sources_addresses,
+        listen_port=args.listen_port,
+        age_record_dir=args.age_record_dir
+    )
     destination.start()

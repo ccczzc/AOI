@@ -86,9 +86,10 @@ def myNetwork(num_sources=10):
     for i, source in enumerate(sources):
         listen_port = 8000 + i
         ip = source.IP()
-        sources_addresses.append(f"{ip}:{listen_port}")
-        makeTerm(source, cmd=f'timeout 11m python3 wifresh_app_source.py {listen_port} 10.0.0.1 9999')
-    makeTerm(destination, cmd='timeout 10m python3 wifresh_app_destination.py --sources ' + ' '.join(sources_addresses))
+        for sensor_type in ['POSITION', 'INERTIAL_MEASUREMENT', 'IMAGE']:
+            sources_addresses.append(f"{ip}:{listen_port}:{sensor_type}")
+        makeTerm(source, cmd=f'timeout 11m python3 wifresh_app_source.py --listen_port {listen_port} --destination 10.0.0.1:9999 --sensors POSITION:50:1 INERTIAL_MEASUREMENT:20:100 IMAGE:19456:2')
+    makeTerm(destination, cmd=f'timeout 10m python3 wifresh_app_destination.py --age_record_dir ./ages_wifresh_app_{num_sources}src --sources ' + ' '.join(sources_addresses))
     info('*** Running CLI\n')
     CLI(net)
     net.stop()
@@ -96,5 +97,5 @@ def myNetwork(num_sources=10):
 
 if __name__ == '__main__':
     setLogLevel( 'info' )
-    myNetwork()
+    myNetwork(num_sources=8)
 

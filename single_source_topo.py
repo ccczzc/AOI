@@ -68,8 +68,8 @@ def myNetwork():
     info('*** Post configure nodes\n')
     info('*** Opening terminals and running commands\n')
     sleep(5)  # 等待10秒
-    makeTerm(sta1, cmd='timeout 11m python3 wifresh_app_source.py 8000 10.0.0.1 9999')
-    makeTerm(h1, cmd='timeout 10m python3 wifresh_app_destination.py --source 10.0.0.2:8000:1')
+    makeTerm(sta1, cmd='timeout 11m python3 wifresh_app_source.py --listen_port 8000 --destination 10.0.0.1:9999 --sensors POSITION:50:1 INERTIAL_MEASUREMENT:20:100 IMAGE:19456:2')
+    makeTerm(h1, cmd='timeout 10m python3 wifresh_app_destination.py --source 10.0.0.2:8000:POSITION 10.0.0.2:8000:INERTIAL_MEASUREMENT 10.0.0.2:8000:IMAGE')
     info('*** Running CLI\n')
     CLI(net)
     net.stop()

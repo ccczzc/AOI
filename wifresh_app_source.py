@@ -1,3 +1,4 @@
+import argparse
 from collections import defaultdict
 import socket
 import time
@@ -125,19 +126,28 @@ class WiFreshSource:
             self.sock.sendto(request.to_bytes(), self.destination_address)
 
 if __name__ == '__main__':
-    if len(sys.argv) != 4:
-        print("Usage: python source.py <listen_port> <destination_host> <destination_port>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description='Start WiFreshSource')
+    parser.add_argument('--listen_port', type=int, required=True, help='Port to listen on')
+    parser.add_argument('--destination', required=True, help='Destination address in the format ip:port')
+    parser.add_argument('--sensors', nargs='+', required=True, help='Sensor configurations in the format type:size:frequency')
+    args = parser.parse_args()
 
-    listen_port = int(sys.argv[1])
-    destination_host = sys.argv[2]
-    destination_port = int(sys.argv[3])
-    destination_address = (destination_host, destination_port)
+    dest_ip, dest_port = args.destination.split(':')
+    destination_address = (dest_ip, int(dest_port))
+
+    # Parse sensor configurations
+    sensor_list = []
+    for sensor_arg in args.sensors:
+        sensor_type_str, size_str, frequency_str = sensor_arg.split(':')
+        sensor_type = DataType[sensor_type_str.upper()]
+        size = int(size_str)
+        frequency = float(frequency_str)
+        sensor_list.append(Sensor(sensor_type, size, frequency))
+        print(f"Added sensor: {sensor_type} - packet size: {size} - frequency: {frequency}")
+
     source = WiFreshSource(
-        listen_port=listen_port, 
-        destination_address = destination_address,
-        sensor_list=[
-            Sensor(DataType.GENERAL, 150, 7000),
-        ]
+        listen_port=args.listen_port,
+        destination_address=destination_address,
+        sensor_list=sensor_list
     )
     source.start()
