@@ -19,8 +19,7 @@ class WiFreshSource:
     ):
         self.listen_port = listen_port
         self.destination_address = destination_address
-        self.packet_header_size = 20  # Packet header size
-        self.max_packet_size = self.get_max_packet_size() - self.packet_header_size  # Max packet size
+        self.max_packet_size = self.get_max_packet_size() - SensorData.header_size  # Max packet size
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(('0.0.0.0', self.listen_port))
         self.sensors: dict[DataType, Sensor] = defaultdict(Sensor)
@@ -36,6 +35,7 @@ class WiFreshSource:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         max_packet_size = sock.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)
         sock.close()
+        # max_packet_size = 1472
         print(f"Max packet size: {max_packet_size}")
         return max_packet_size
 
