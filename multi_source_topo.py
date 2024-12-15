@@ -88,8 +88,8 @@ def myNetwork(num_sources=10):
         ip = source.IP()
         for sensor_type in ['POSITION', 'IMAGE']:
             sources_addresses.append(f"{ip}:{listen_port}:{sensor_type}")
-        makeTerm(source, cmd=f'timeout 11m python3 wifresh_app_source.py --listen_port {listen_port} --destination 10.0.0.1:9999 --sensors POSITION:50:1 IMAGE:19456:2')
-    makeTerm(destination, cmd=f'timeout 10m python3 wifresh_app_destination.py --age_record_dir ./ages_wifresh_app_{num_sources}src --sources ' + ' '.join(sources_addresses))
+        makeTerm(source, cmd=f'timeout 12m python3 wifresh_app_source.py --listen_port {listen_port} --destination 10.0.0.1:9999 --sensors POSITION:50:1 IMAGE:19456:2')
+    makeTerm(destination, cmd=f'python3 wifresh_app_destination.py --age_record_dir ./ages_wifresh_app_{num_sources}src --sources ' + ' '.join(sources_addresses))
     info('*** Running CLI\n')
     CLI(net)
     net.stop()

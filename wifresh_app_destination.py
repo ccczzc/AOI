@@ -10,7 +10,7 @@ from sensor import SensorData, DataType
 import bisect
 
 class SourceState:
-    def __init__(self, output_fd: TextIOWrapper):
+    def __init__(self, output_fd: TextIOWrapper = None):
         self.weight: float = 0
         self.last_systime_received: float = time.time()
         self.approximate_systime_HOL: float = 0
@@ -19,6 +19,8 @@ class SourceState:
         self.time_received_packets: list[float] = []
         self.time_period: str = 0.5
         self.output_fd = output_fd
+        self.last_recorded_age = 0.0
+        self.total_weighted_ages: float = 0.0
 
     def update_weight(self):
         now_timestamp = time.time()
@@ -55,20 +57,34 @@ class WiFreshDestination:
         self.poll_interval = poll_interval  # Polling interval
         self.age_record_interval = age_record_interval  # Age record interval
         self.sources_state: dict[Tuple[str, int, DataType], SourceState] = defaultdict(SourceState)
+        self.age_record_dir = age_record_dir
         os.makedirs(age_record_dir, exist_ok=True)
         for source_address in sources_addresses:
-            source_file_path = os.path.join(age_record_dir, f"{source_address[0]}_{source_address[1]}_{source_address[2]}.txt")
-            with open(source_file_path, 'w'):
-                # Open file in write mode to clear contents
-                pass
-            self.sources_state[source_address] = SourceState(output_fd=open(source_file_path, 'a'))
+            # source_file_path = os.path.join(age_record_dir, f"{source_address[0]}_{source_address[1]}_{source_address[2]}.txt")
+            # with open(source_file_path, 'w'):
+            #     # Open file in write mode to clear contents
+            #     pass
+            self.sources_state[source_address] = SourceState()
         self.last_poll_time = time.time() - self.poll_interval  # Last poll time
         self.last_age_record_time = time.time() - self.age_record_interval
+        self.start_time = time.time()
+        self.running_period = 600.0  # 10 minutes in seconds
 
     def start(self):
         print("WiFresh APP destination started")
         self.sock.setblocking(False)
         while True:
+            if time.time() - self.start_time >= self.running_period:
+                print("WiFresh APP destination stopped")
+                record_file_path = os.path.join(self.age_record_dir, f"ages_{len(self.sources_state)}sources.txt")
+                with open(record_file_path, 'w') as record_file:
+                    mean_ages = []
+                    for source_address, source in self.sources_state.items():
+                        mean_age = source.total_weighted_ages / self.running_period
+                        record_file.write(f"{source_address[0]}_{source_address[1]}_{source_address[2]}: {mean_age}\n")
+                        mean_ages.append(mean_age)
+                    record_file.write(f"Mean AOI of all data sources: {sum(mean_ages) / len(mean_ages)}\n")
+                break
             self.receive_response()
             if time.time() - self.last_poll_time >= self.poll_interval:
                 self.schedule_poll()
@@ -79,7 +95,9 @@ class WiFreshDestination:
         for source in self.sources_state.values():
             current_time = time.time()
             age = current_time - source.last_systime_received
-            source.output_fd.write(f"{current_time:.8f}, {age:.7f}\n")
+            age_area = (age + source.last_recorded_age) * (current_time - self.last_age_record_time) / 2
+            source.total_weighted_ages += age_area
+            source.last_recorded_age = age
         self.last_age_record_time = time.time()
 
     def schedule_poll(self):
