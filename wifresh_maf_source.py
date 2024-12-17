@@ -7,7 +7,7 @@ from sensor import Sensor, SensorData, DataType
 import sys
 import select
 
-class WiFreshSource:
+class WiFreshMAFSource:
     def __init__(
         self, 
         listen_port, 
@@ -74,20 +74,20 @@ class WiFreshSource:
                         print(f"Updated clock offset: {self.clock_offset} seconds")
                 else:
                     print(f"Received unknown message from {addr}: {data_str}")
-            # if start_transmission:
-            for sensor in self.sensors.values():
-                sensor.generate_data()
+            if start_transmission:
+                for sensor in self.sensors.values():
+                    sensor.generate_data()
 
     def process_poll(self, sensor_type):
         if sensor_type not in self.sensors:
             print(f"Unknown sensor type: {sensor_type}")
             return
         sensor = self.sensors[sensor_type]
-        if sensor.fcfs_queue:
-            fragment = sensor.fcfs_queue.pop(0)  # Get next fragment from FCFS queue
+        if sensor.fragment_data_queue:
+            fragment = sensor.fragment_data_queue.pop(0)  # Get next fragment from FCFS queue
             self.send_packet(fragment)
-        elif sensor.lcfs_queue:
-            info_update = sensor.lcfs_queue.pop()  # Get update from LCFS queue
+        elif sensor.complete_data_queue:
+            info_update = sensor.complete_data_queue.pop()  # Get update from LCFS queue
             # Adjust timestamp with clock offset
             info_update.timestamp += self.clock_offset
             if len(info_update.data) <= self.max_packet_size:
@@ -106,8 +106,8 @@ class WiFreshSource:
                         timestamp=info_update.timestamp,
                         data=fragment
                     )
-                    sensor.fcfs_queue.append(fragment_data)  # Add to FCFS queue
-                self.send_packet(sensor.fcfs_queue.pop(0))  # Send first fragment
+                    sensor.fragment_data_queue.append(fragment_data)  # Add to FCFS queue
+                self.send_packet(sensor.fragment_data_queue.pop(0))  # Send first fragment
         else:
             # Send empty packet with adjusted timestamp
             empty_packet = SensorData(is_fragmented=0, data_type=sensor_type, timestamp=time.time() + self.clock_offset, data=b'')
@@ -145,7 +145,7 @@ if __name__ == '__main__':
         sensor_list.append(Sensor(sensor_type, size, frequency))
         print(f"Added sensor: {sensor_type} - packet size: {size} - frequency: {frequency}")
 
-    source = WiFreshSource(
+    source = WiFreshMAFSource(
         listen_port=args.listen_port,
         destination_address=destination_address,
         sensor_list=sensor_list

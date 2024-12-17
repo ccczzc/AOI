@@ -21,7 +21,7 @@ class SourceState:
     def reset_fragments(self):
         self.fragments = []
 
-class WiFreshDestination:
+class WiFreshMAFDestination:
     def __init__(
         self, 
         sources_addresses: List[Tuple[str, int, DataType]], 
@@ -49,26 +49,29 @@ class WiFreshDestination:
         self.running_period = 600.0  # 10 minutes in seconds
 
     def start(self):
-        print("WiFresh APP destination started")
+        print("WiFresh MAF destination started")
         self.sock.setblocking(False)
         while True:
-            if time.time() - self.start_time >= self.running_period:
-                print("WiFresh APP destination stopped")
-                record_file_path = os.path.join(self.age_record_dir, f"ages_{len(self.sources_state)}sources.txt")
-                with open(record_file_path, 'w') as record_file:
-                    mean_ages = []
-                    for source_address, source in self.sources_state.items():
-                        mean_age = source.total_weighted_ages / self.running_period
-                        record_file.write(f"{source_address[0]}_{source_address[1]}_{source_address[2]}: {mean_age}\n")
-                        mean_ages.append(mean_age)
-                    record_file.write(f"Mean AOI of all data sources: {sum(mean_ages) / len(mean_ages)}\n")
-                break
             self.receive_response()
             if time.time() - self.last_poll_time >= self.poll_interval:
                 self.schedule_poll()
             if time.time() - self.last_age_record_time >= self.age_record_interval:
                 self.record_age()
-
+            if time.time() - self.start_time >= self.running_period:
+                self.save_ages()
+                print("WiFresh MAF destination stopped")
+                break
+            
+    def save_ages(self):
+        record_file_path = os.path.join(self.age_record_dir, f"ages_{len(self.sources_state)}sources.txt")
+        with open(record_file_path, 'w') as record_file:
+            mean_ages = []
+            for source_address, source in self.sources_state.items():
+                mean_age = source.total_weighted_ages / self.running_period
+                record_file.write(f"{source_address[0]}_{source_address[1]}_{source_address[2]}: {mean_age}\n")
+                mean_ages.append(mean_age)
+            record_file.write(f"Mean AOI of all data sources: {sum(mean_ages) / len(mean_ages)}\n")
+    
     def record_age(self):
         for source in self.sources_state.values():
             current_time = time.time()
@@ -99,7 +102,7 @@ class WiFreshDestination:
     def receive_response(self):
         readable, _, _ = select.select([self.sock], [], [], 0)
         if readable:
-            data_bytes, addr = self.sock.recvfrom(4096)
+            data_bytes, addr = self.sock.recvfrom(4096*4096)
             # if addr not in self.sources_state:
             #     print(f"Received data from unknown source {addr}: {data_bytes.decode()}")
             #     exit(1)
@@ -129,7 +132,6 @@ class WiFreshDestination:
             fresh_fragment.timestamp = max(fresh_fragment.timestamp, time.time())
             if source.last_systime_received < fresh_fragment.timestamp:
                 source.last_systime_received = fresh_fragment.timestamp
-                time_received = time.time()
             # Schedule the next poll
             self.schedule_poll()
 
@@ -150,7 +152,7 @@ if __name__ == '__main__':
         print("Usage: python destination.py --sources <ip:port:type> <ip:port:type> ...")
         exit(1)
 
-    destination = WiFreshDestination(
+    destination = WiFreshMAFDestination(
         sources_addresses=sources_addresses,
         listen_port=args.listen_port,
         age_record_dir=args.age_record_dir

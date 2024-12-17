@@ -57,8 +57,8 @@ class Sensor:
         self.data_size = packet_size - SensorData.header_size  # 计算数据部分大小
         self.generation_interval = 1.0 / generation_rate
         self.last_generation_time = time.time() - self.generation_interval
-        self.lcfs_queue: list[SensorData] = []  # LCFS queue
-        self.fcfs_queue: list[SensorData] = []  # FCFS fragment queue
+        self.complete_data_queue: list[SensorData] = []
+        self.fragment_data_queue: list[SensorData] = []  # FCFS fragment queue
 
     def generate_data(self):
         if time.time() - self.last_generation_time < self.generation_interval:
@@ -71,4 +71,4 @@ class Sensor:
             data=bytes(random.getrandbits(8) for _ in range(self.data_size))
         )
         self.last_generation_time = time.time()
-        self.lcfs_queue.append(sensor_data)
+        self.complete_data_queue.append(sensor_data)
