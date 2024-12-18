@@ -3,13 +3,14 @@ import socket
 import time
 import struct
 from typing import List
-from sensor import Sensor, SensorData, DataType
+from sensor_for_tcp import Sensor, SensorData, DataType
 
 class WiFiTCPFcfsSource:
     def __init__(
         self, 
         listen_port, 
         destination_address,
+        source_id,          # New parameter
         sensor_list: List[Sensor],
         sync_interval=5,
         sync_rounds=5,
@@ -27,6 +28,7 @@ class WiFiTCPFcfsSource:
         self.clock_offset_alpha = clock_offset_alpha
         self.connected = False
         self.recv_buffer = bytearray()
+        self.source_id = source_id  # New field
 
     def connect_to_destination(self):
         while not self.connected:
@@ -58,16 +60,16 @@ class WiFiTCPFcfsSource:
                         self.send_packet(oldest_data)
                         sensor.complete_data_queue.pop(0)
                     except BlockingIOError:
-                        print("BlockingIOError while sending data")
+                        # print("BlockingIOError while sending data")
                         oldest_data.timestamp -= self.clock_offset
 
     def receive_response(self):
         try:
             data = self.sock.recv(4096)
             if data:
-                # Append received data to buffer
+                # 将接收到的数据添加到缓冲区
                 self.recv_buffer.extend(data)
-                # Process complete messages from buffer
+                # 处理缓冲区中的完整消息
                 self.process_buffer()
             else:
                 print("Received empty data, reconnecting...")
@@ -81,22 +83,23 @@ class WiFiTCPFcfsSource:
             self.connect_to_destination()
 
     def process_buffer(self):
-        # Define the delimiter for TIME_RESPONSE messages
-        delimiter = b'\n'
         while True:
-            if delimiter in self.recv_buffer:
-                # Split the buffer at the delimiter
-                index = self.recv_buffer.index(delimiter)
-                message_bytes = self.recv_buffer[:index]
-                self.recv_buffer = self.recv_buffer[index + 1:]  # Remove the processed message
-                # Process the message
-                self.process_time_response(message_bytes)
-            else:
-                break  # No complete message available yet
+            if len(self.recv_buffer) < 4:
+                # 不足以读取长度前缀
+                break
+            total_length = struct.unpack('>I', self.recv_buffer[:4])[0]
+            if len(self.recv_buffer) < 4 + total_length:
+                # 数据未接收完整
+                break
+            # 提取完整的消息
+            message_bytes = self.recv_buffer[:4 + total_length]
+            # 更新缓冲区，移除已处理的消息
+            self.recv_buffer = self.recv_buffer[4 + total_length:]
+            # 处理消息
+            data_str = message_bytes[4:].decode()
+            self.process_time_response(data_str)
 
-    def process_time_response(self, message_bytes):
-        # Convert bytes to string
-        data_str = message_bytes.decode()
+    def process_time_response(self, data_str):
         if data_str.startswith('TIME_RESPONSE'):
             parts = data_str.split(':')
             if len(parts) == 3:
@@ -112,6 +115,7 @@ class WiFiTCPFcfsSource:
             print(f"Received unknown message: {data_str}")
 
     def send_packet(self, packet: SensorData):
+        packet.source_id = self.source_id  # Set the source_id
         self.sock.sendall(packet.to_bytes())
 
     def clock_synchronization(self):
@@ -122,11 +126,13 @@ class WiFiTCPFcfsSource:
                     is_fragmented=0,
                     data_type=DataType.TIME_REQUEST,
                     timestamp=current_time,
+                    source_id=self.source_id,
                     data=b''
                 )
                 self.sock.sendall(request.to_bytes())
             except BlockingIOError:
-                print("BlockingIOError during clock synchronization")
+                # print("BlockingIOError during clock synchronization")
+                pass
         self.last_sync_time = time.time()
 
 if __name__ == '__main__':
@@ -134,23 +140,25 @@ if __name__ == '__main__':
     parser.add_argument('--listen_port', type=int, required=True, help='Port to listen on')
     parser.add_argument('--destination', required=True, help='Destination address in the format ip:port')
     parser.add_argument('--sensors', nargs='+', required=True, help='Sensor configurations in the format type:size:frequency')
+    parser.add_argument('--source_id', type=int, required=True, help='Source ID')
     args = parser.parse_args()
 
     dest_ip, dest_port = args.destination.split(':')
     destination_address = (dest_ip, int(dest_port))
-
+    source_id = args.source_id
     sensor_list = []
     for sensor_arg in args.sensors:
         sensor_type_str, size_str, frequency_str = sensor_arg.split(':')
         sensor_type = DataType[sensor_type_str.upper()]
         size = int(size_str)
         frequency = float(frequency_str)
-        sensor_list.append(Sensor(sensor_type, size, frequency))
+        sensor_list.append(Sensor(sensor_type, size, frequency, source_id))
         print(f"Added sensor: {sensor_type} - packet size: {size} - frequency: {frequency}")
 
     source = WiFiTCPFcfsSource(
         listen_port=args.listen_port,
         destination_address=destination_address,
+        source_id=source_id,
         sensor_list=sensor_list
     )
     source.start()

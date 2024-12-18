@@ -5,7 +5,7 @@ import time
 import os
 import struct
 from typing import List, Tuple
-from sensor import DataType, SensorData
+from sensor_for_tcp import DataType, SensorData
 
 class SourceState:
     def __init__(self):
@@ -17,7 +17,7 @@ class SourceState:
 class WiFiTCPFcfsDestination:
     def __init__(
         self, 
-        sources_addresses: List[Tuple[str, int, DataType]], 
+        sources_addresses: List[Tuple[int, DataType]],  # Changed to use source_id
         listen_port=9999, 
         age_record_dir='./ages_wifi_tcp_fcfs',
         age_record_interval=1e-4
@@ -25,11 +25,12 @@ class WiFiTCPFcfsDestination:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind(('0.0.0.0', listen_port))
         self.sock.listen()
-        self.sources_state: dict[Tuple[str, int, DataType], SourceState] = {}
+        self.sources_state: dict[Tuple[int, DataType], SourceState] = {}
         self.age_record_dir = age_record_dir
         os.makedirs(age_record_dir, exist_ok=True)
-        for source_address in sources_addresses:
-            self.sources_state[source_address] = SourceState()
+        for source_id, data_type in sources_addresses:
+            self.sources_state[(source_id, data_type)] = SourceState()
+            print(f"Added source {source_id} {data_type}")
         self.age_record_interval = age_record_interval
         self.last_age_record_time = time.time() - self.age_record_interval
         self.start_time = time.time()
@@ -66,7 +67,7 @@ class WiFiTCPFcfsDestination:
             mean_ages = []
             for source_address, source in self.sources_state.items():
                 mean_age = source.total_weighted_ages / self.running_period
-                record_file.write(f"{source_address[0]}_{source_address[1]}_{source_address[2]}: {mean_age}\n")
+                record_file.write(f"{source_address[0]}_{source_address[1]}: {mean_age}\n")
                 mean_ages.append(mean_age)
             if mean_ages:
                 record_file.write(f"Mean AOI of all data sources: {sum(mean_ages) / len(mean_ages)}\n")
@@ -90,14 +91,42 @@ class WiFiTCPFcfsDestination:
                 if not data_bytes:
                     self.close_connection(sock)
                     continue
-                # Append received data to buffer
+                # 将接收到的数据添加到缓冲区
                 self.recv_buffers[sock].extend(data_bytes)
-                # Process messages from buffer
+                # 处理缓冲区中的完整消息
                 self.process_buffer(sock)
             except ConnectionResetError:
                 self.close_connection(sock)
         for sock in exceptional:
             self.close_connection(sock)
+
+    def process_buffer(self, sock):
+        buffer = self.recv_buffers[sock]
+        while True:
+            if len(buffer) < 4:
+                break
+            try:
+                total_length = struct.unpack('>I', buffer[:4])[0]
+            except struct.error as e:
+                print(f"Error unpacking length prefix: {e}")
+                buffer.pop(0)
+                continue
+            if len(buffer) < 4 + total_length:
+                break
+            message_bytes = buffer[:4 + total_length]
+            buffer[:4 + total_length] = []
+            try:
+                data_structed, _ = SensorData.from_bytes(message_bytes)
+                if data_structed is None:
+                    print("Failed to parse SensorData from bytes")
+                    continue
+                if data_structed.data_type == DataType.TIME_REQUEST:
+                    self.handle_time_request(sock, data_structed)
+                else:
+                    self.process_fragment(data_structed)
+            except Exception as e:
+                print(f"Error parsing message: {e}")
+                continue
 
     def close_connection(self, sock):
         print(f"Closing connection to {sock.getpeername()}")
@@ -105,61 +134,32 @@ class WiFiTCPFcfsDestination:
         del self.recv_buffers[sock]
         sock.close()
 
-    def process_buffer(self, sock):
-        buffer = self.recv_buffers[sock]
-        while True:
-            if len(buffer) < SensorData.header_size:
-                # Not enough data for header
-                break
-            # Peek at the header to determine the message length
-            header = buffer[:SensorData.header_size]
-            is_fragmented, data_type_value, timestamp = struct.unpack('>BBd', header)
-            data_type = DataType(data_type_value)
-            # Determine the expected total message size
-            if data_type == DataType.TIME_REQUEST:
-                total_size = SensorData.header_size  # No additional data
-            elif data_type == DataType.POSITION:
-                total_size = 50  # Including header
-            elif data_type == DataType.IMAGE:
-                total_size = 19456  # Including header
-            else:
-                # Handle other data types if needed
-                total_size = SensorData.header_size  # Default to header size
-            
-            if len(buffer) < total_size:
-                # Not enough data for the full message
-                break
-            # Extract the full message
-            message_bytes = buffer[:total_size]
-            buffer[:total_size] = []
-            # Process the message
-            data_structed = SensorData.from_bytes(message_bytes)
-            if data_structed.data_type == DataType.TIME_REQUEST:
-                self.handle_time_request(sock, data_structed)
-            else:
-                source_addr = (sock.getpeername()[0], sock.getpeername()[1], data_structed.data_type)
-                self.process_fragment(data_structed, source_addr)
-
     def handle_time_request(self, sock, data_structed):
         source_time = data_structed.timestamp
         current_time = time.time()
-        response = f"TIME_RESPONSE:{current_time:010.15f}:{source_time:010.15f}\n"
+        response = f"TIME_RESPONSE:{current_time:010.15f}:{source_time:010.15f}"
+        response_bytes = response.encode()
+        total_length = len(response_bytes)
+        length_prefix = struct.pack('>I', total_length)
+        response_message = length_prefix + response_bytes
         try:
-            sock.sendall(response.encode())
+            sock.sendall(response_message)
             print(f"Sent TIME_RESPONSE to {sock.getpeername()}: {current_time}")
         except BrokenPipeError:
             self.close_connection(sock)
+            print(f"Error sending TIME_RESPONSE to {sock.getpeername()}")
 
-    def process_fragment(self, fresh_data: SensorData, source_addr):
+    def process_fragment(self, fresh_data: SensorData):
         if fresh_data is None:
             return
-        source = self.sources_state.get(source_addr)
+        source_key = (fresh_data.source_id, fresh_data.data_type)
+        source = self.sources_state.get(source_key)
         if source:
             fresh_data.timestamp = max(fresh_data.timestamp, time.time())
             if source.last_systime_received < fresh_data.timestamp:
                 source.last_systime_received = fresh_data.timestamp
         else:
-            print(f"Received data from unknown source: {source_addr}")
+            print(f"Received data from unknown source ID: {fresh_data.source_id} {fresh_data.data_type}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Start WiFiTCPFcfsDestination')
@@ -171,11 +171,13 @@ if __name__ == '__main__':
     sources_addresses = []
     if args.sources:
         for src in args.sources:
-            ip, port, type_str = src.split(':')
-            sources_addresses.append((ip, int(port), DataType[type_str.upper()]))
+            source_id_str, type_str = src.split(':')
+            source_id = int(source_id_str)  # Convert to integer
+            sources_addresses.append((source_id, DataType[type_str.upper()]))
+            print(f"Added source {source_id} {DataType[type_str.upper()]}")
     else:
         print("No sources specified")
-        print("Usage: python destination.py --sources <ip:port:type> <ip:port:type> ...")
+        print("Usage: python destination.py --sources <source_id:type> <source_id:type> ...")
         exit(1)
 
     destination = WiFiTCPFcfsDestination(
