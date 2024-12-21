@@ -15,6 +15,7 @@ class SourceState:
         self.output_fd = output_fd
         self.last_recorded_age = 0.0
         self.total_weighted_ages: float = 0.0
+        self.last_received_time: float = time.time()
 
 class WiFiUDPFcfsDestination:
     def __init__(
@@ -44,8 +45,8 @@ class WiFiUDPFcfsDestination:
         self.sock.setblocking(False)
         while True:
             self.receive_response()
-            if time.time() - self.last_age_record_time >= self.age_record_interval:
-                self.record_age()
+            # if time.time() - self.last_age_record_time >= self.age_record_interval:
+            #     self.record_age()
             if time.time() - self.start_time >= self.running_period:
                 self.save_ages()
                 print("WiFi UDP FCFS destination stopped")
@@ -56,7 +57,9 @@ class WiFiUDPFcfsDestination:
         with open(record_file_path, 'w') as record_file:
             mean_ages = []
             for source_address, source in self.sources_state.items():
-                mean_age = source.total_weighted_ages / self.running_period
+                last_age_area =  (source.last_recorded_age + time.time() - source.last_systime_received) * (time.time() - source.last_received_time) / 2.0
+                source.total_weighted_ages += last_age_area
+                mean_age = source.total_weighted_ages / (time.time() - self.start_time)
                 record_file.write(f"{source_address[0]}_{source_address[1]}_{source_address[2]}: {mean_age}\n")
                 mean_ages.append(mean_age)
             record_file.write(f"Mean AOI of all data sources: {sum(mean_ages) / len(mean_ages)}\n")
@@ -82,8 +85,11 @@ class WiFiUDPFcfsDestination:
                 # Handle time synchronization request
                 current_time = time.time()
                 response = f"TIME_RESPONSE:{current_time:010.15f}:{source_time:010.15f}"
-                self.sock.sendto(response.encode(), addr)
-                print(f"Sent TIME_RESPONSE to {addr}: {current_time}")
+                try:
+                    self.sock.sendto(response.encode(), addr)
+                    print(f"Sent TIME_RESPONSE to {addr}: {current_time}")
+                except BlockingIOError:
+                    print("destination sendto BlockingIOError")
             else:
                 # Assuming the type can be inferred from the data_structed
                 source_type = data_structed.data_type
@@ -91,15 +97,21 @@ class WiFiUDPFcfsDestination:
                 self.process_fragment(data_structed, addr_with_type)
             
 
-    def process_fragment(self, fresh_data: SensorData, source_addr):
-        if fresh_data is None:
+    def process_fragment(self, fresh_fragment: SensorData, source_addr):
+        if fresh_fragment is None:
             return
         source = self.sources_state[source_addr]
-        source = self.sources_state[source_addr]
         # Update last_systime_received
-        fresh_data.timestamp = max(fresh_data.timestamp, time.time())
-        if source.last_systime_received < fresh_data.timestamp:
-            source.last_systime_received = fresh_data.timestamp
+        fresh_fragment.timestamp = max(fresh_fragment.timestamp, time.time())
+        if source.last_systime_received < fresh_fragment.timestamp:
+            time_received = time.time()
+            # Record age
+            age = time_received - source.last_systime_received
+            age_area = (age + source.last_recorded_age) * (time_received - source.last_received_time) / 2
+            source.total_weighted_ages += age_area
+            source.last_received_time = time_received
+            source.last_recorded_age = time_received - fresh_fragment.timestamp
+            source.last_systime_received = fresh_fragment.timestamp
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Start WiFreshDestination')

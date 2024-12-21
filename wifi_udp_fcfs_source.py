@@ -15,7 +15,7 @@ class WiFiUDPFcfsSource:
         sync_interval=5,
         sync_rounds=5,
         clock_offset_alpha=0.02
-        ):
+    ):
         self.listen_port = listen_port
         self.destination_address = destination_address
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -36,6 +36,7 @@ class WiFiUDPFcfsSource:
             # Check if clock synchronization is needed
             if time.time() - self.last_sync_time >= self.sync_interval:
                 self.clock_synchronization()
+                self.last_sync_time = time.time()
 
             for sensor in self.sensor_list:
                 # Try generate sensor data
@@ -52,23 +53,23 @@ class WiFiUDPFcfsSource:
                         oldest_data.timestamp -= self.clock_offset
 
     def receive_response(self):
-            readable, _, _ = select.select([self.sock], [], [], 0)
-            if readable:
-                data, addr = self.sock.recvfrom(1024)
-                data_str = data.decode()
-                if data_str.startswith('TIME_RESPONSE'):
-                    # Handle clock synchronization response
-                    parts = data_str.split(':')
-                    if len(parts) == 3:
-                        dest_time = float(parts[1])
-                        t1 = float(parts[2])
-                        t2 = time.time()
-                        offset = dest_time - ((t1 + t2) / 2)
-                        # Update clock offset using exponential moving average
-                        self.clock_offset = self.clock_offset_alpha * offset + (1 - self.clock_offset_alpha) * self.clock_offset
-                        print(f"Updated clock offset: {self.clock_offset} seconds")
-                else:
-                    print(f"Received unknown message from {addr}: {data_str}")
+        readable, _, _ = select.select([self.sock], [], [], 0)
+        if readable:
+            data, addr = self.sock.recvfrom(1024)
+            data_str = data.decode()
+            if data_str.startswith('TIME_RESPONSE'):
+                # Handle clock synchronization response
+                parts = data_str.split(':')
+                if len(parts) == 3:
+                    dest_time = float(parts[1])
+                    t1 = float(parts[2])
+                    t2 = time.time()
+                    offset = dest_time - ((t1 + t2) / 2)
+                    # Update clock offset using exponential moving average
+                    self.clock_offset = self.clock_offset_alpha * offset + (1 - self.clock_offset_alpha) * self.clock_offset
+                    print(f"Updated clock offset: {self.clock_offset} seconds")
+            else:
+                print(f"Received unknown message from {addr}: {data_str}")
 
     def send_packet(self, packet: SensorData):
         bytes_sent = self.sock.sendto(packet.to_bytes(), self.destination_address)
@@ -85,11 +86,12 @@ class WiFiUDPFcfsSource:
                 print("source clock_synchronization sendto BlockingIOError")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Start Source')
+    parser = argparse.ArgumentParser(description='Start WiFi UDP FCFS Source')
     parser.add_argument('--listen_port', type=int, required=True, help='Port to listen on')
     parser.add_argument('--destination', required=True, help='Destination address in the format ip:port')
     parser.add_argument('--sensors', nargs='+', required=True, help='Sensor configurations in the format type:size:frequency')
     args = parser.parse_args()
+    
 
     dest_ip, dest_port = args.destination.split(':')
     destination_address = (dest_ip, int(dest_port))

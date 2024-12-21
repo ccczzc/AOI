@@ -17,9 +17,10 @@ class SourceState:
         self.output_fd = output_fd
         self.last_recorded_age = 0.0
         self.total_weighted_ages: float = 0.0
+        self.last_received_time: float = time.time()
 
     def reset_fragments(self):
-        self.fragments = []
+        self.fragments = b""
 
 class WiFreshMAFDestination:
     def __init__(
@@ -55,8 +56,8 @@ class WiFreshMAFDestination:
             self.receive_response()
             if time.time() - self.last_poll_time >= self.poll_interval:
                 self.schedule_poll()
-            if time.time() - self.last_age_record_time >= self.age_record_interval:
-                self.record_age()
+            # if time.time() - self.last_age_record_time >= self.age_record_interval:
+            #     self.record_age()
             if time.time() - self.start_time >= self.running_period:
                 self.save_ages()
                 print("WiFresh MAF destination stopped")
@@ -67,7 +68,9 @@ class WiFreshMAFDestination:
         with open(record_file_path, 'w') as record_file:
             mean_ages = []
             for source_address, source in self.sources_state.items():
-                mean_age = source.total_weighted_ages / self.running_period
+                last_age_area =  (source.last_recorded_age + time.time() - source.last_systime_received) * (time.time() - source.last_received_time) / 2.0
+                source.total_weighted_ages += last_age_area
+                mean_age = source.total_weighted_ages / (time.time() - self.start_time)
                 record_file.write(f"{source_address[0]}_{source_address[1]}_{source_address[2]}: {mean_age}\n")
                 mean_ages.append(mean_age)
             record_file.write(f"Mean AOI of all data sources: {sum(mean_ages) / len(mean_ages)}\n")
@@ -131,6 +134,13 @@ class WiFreshMAFDestination:
             source.reset_fragments()
             fresh_fragment.timestamp = max(fresh_fragment.timestamp, time.time())
             if source.last_systime_received < fresh_fragment.timestamp:
+                time_received = time.time()
+                # Record age
+                age = time_received - source.last_systime_received
+                age_area = (age + source.last_recorded_age) * (time_received - source.last_received_time) / 2
+                source.total_weighted_ages += age_area
+                source.last_received_time = time_received
+                source.last_recorded_age = time_received - fresh_fragment.timestamp
                 source.last_systime_received = fresh_fragment.timestamp
             # Schedule the next poll
             self.schedule_poll()
