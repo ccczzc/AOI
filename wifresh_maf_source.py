@@ -1,5 +1,6 @@
 import argparse
 from collections import defaultdict
+import random
 import socket
 import time
 from typing import List
@@ -27,7 +28,7 @@ class WiFreshMAFSource:
             self.sensors[sensor.data_type] = sensor
         self.clock_offset = 0.0  # Clock offset between source and destination
         self.sync_interval = sync_interval  # Clock synchronization interval in seconds
-        self.last_sync_time = time.time()
+        self.last_sync_time = time.time() - random.uniform(0, self.sync_interval)  # Randomize initial sync time
         self.sync_rounds = sync_rounds  # Number of synchronization messages per sync
         self.clock_offset_alpha = clock_offset_alpha  # Smoothing factor for clock offset adjustment (0 < alpha <= 1)
 
@@ -40,7 +41,7 @@ class WiFreshMAFSource:
         return max_packet_size
 
     def start(self):
-        print(f"WiFresh APP source started on port {self.listen_port}")
+        print(f"WiFresh MAF source started on port {self.listen_port}")
         self.sock.setblocking(False)
         start_transmission = False
         while True:
@@ -71,7 +72,7 @@ class WiFreshMAFSource:
                         offset = dest_time - ((t1 + t2) / 2)
                         # Update clock offset using exponential moving average
                         self.clock_offset = self.clock_offset_alpha * offset + (1 - self.clock_offset_alpha) * self.clock_offset
-                        print(f"Updated clock offset: {self.clock_offset} seconds")
+                        # print(f"Updated clock offset: {self.clock_offset} seconds")
                 else:
                     print(f"Received unknown message from {addr}: {data_str}")
             if start_transmission:
@@ -88,6 +89,7 @@ class WiFreshMAFSource:
             self.send_packet(fragment)
         elif sensor.complete_data_queue:
             info_update = sensor.complete_data_queue.pop()  # Get update from LCFS queue
+            sensor.complete_data_queue.clear()  # Clear LCFS queue
             # Adjust timestamp with clock offset
             info_update.timestamp += self.clock_offset
             if len(info_update.data) <= self.max_packet_size:

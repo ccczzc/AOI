@@ -114,9 +114,12 @@ class WiFreshDestination:
     def select_source(self):
         if not self.sources_state:
             return None
-        for source in self.sources_state.values():
+        max_weight, selected_source = None, None
+        for source_tuple, source in self.sources_state.items():
             source.update_weight()
-        selected_source = max(self.sources_state, key=lambda k: self.sources_state[k].weight, default=None)
+            if selected_source is None or source.weight > max_weight:
+                max_weight = source.weight
+                selected_source = source_tuple
         return selected_source
 
     def send_poll(self, source_tuple):
@@ -143,7 +146,7 @@ class WiFreshDestination:
                 current_time = time.time()
                 response = f"TIME_RESPONSE:{current_time:010.15f}:{source_time:010.15f}"
                 self.sock.sendto(response.encode(), addr)
-                print(f"Sent TIME_RESPONSE to {addr}: {current_time}")
+                # print(f"Sent TIME_RESPONSE to {addr}: {current_time}")
             else:
                 # Assuming the type can be inferred from the data_structed
                 source_type = data_structed.data_type

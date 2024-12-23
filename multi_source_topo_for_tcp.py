@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import sys
 from time import sleep
 from mininet.node import Controller,  Host
 from mininet.log import setLogLevel, info
@@ -82,8 +83,10 @@ def myNetwork(num_sources=10):
     sleep(5)  # 等待10秒
     # sta1.sendCmd('timeout 11m python3 source.py 8000 10.0.0.1 9999')
     # h1.sendCmd('timeout 10m python3 destination.py')
-    data_types = ['POSITION', 'IMAGE']
-    data_types_detailed = ['POSITION:50:1', 'IMAGE:19456:2']
+    # data_types = ['POSITION', 'IMAGE']
+    # data_types_detailed = ['POSITION:50:1', 'IMAGE:19456:2']
+    data_types = ['POSITION', 'INERTIAL_MEASUREMENT']
+    data_types_detailed = 'POSITION:50:1 INERTIAL_MEASUREMENT:20:100'
     sources_addresses = []
     for i, source in enumerate(sources):
         listen_port = 8000 + i
@@ -92,7 +95,7 @@ def myNetwork(num_sources=10):
         for sensor_type in data_types:
             sources_addresses.append(f"{source_id}:{sensor_type}")
         makeTerm(source, cmd=f'timeout 12m python3 wifi_tcp_fcfs_source.py --listen_port {listen_port} --destination 10.0.0.1:9999 --sensors POSITION:50:1 IMAGE:19456:2 --source_id {source_id}')
-    makeTerm(destination, cmd=f'python3 wifi_tcp_fcfs_destination.py --age_record_dir ./ages_wifi_tcp_fcfs_{num_sources}src --sources ' + ' '.join(sources_addresses) + '> ./destination.log 2>&1')
+    makeTerm(destination, cmd=f'python3 wifi_tcp_fcfs_destination.py --age_record_dir ./ages2/ages_wifi_tcp_fcfs_{num_sources}src --sources ' + ' '.join(sources_addresses) + '> ./destination.log 2>&1')
     info('*** Running CLI\n')
     CLI(net)
     net.stop()
@@ -101,5 +104,6 @@ def myNetwork(num_sources=10):
 
 if __name__ == '__main__':
     setLogLevel( 'info' )
-    myNetwork(num_sources=6)
+    num_sources = int(sys.argv[1]) if len(sys.argv) > 1 else 1
+    myNetwork(num_sources=num_sources)
 

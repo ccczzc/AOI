@@ -1,3 +1,4 @@
 *.pyc
-/ages_*
+ages_*
 *.log
+*.txt

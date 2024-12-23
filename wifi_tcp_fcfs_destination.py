@@ -91,9 +91,9 @@ class WiFiTCPFcfsDestination:
                 if not data_bytes:
                     self.close_connection(sock)
                     continue
-                # 将接收到的数据添加到缓冲区
+                # Add received data to buffer
                 self.recv_buffers[sock].extend(data_bytes)
-                # 处理缓冲区中的完整消息
+                # Process complete messages in buffer
                 self.process_buffer(sock)
             except ConnectionResetError:
                 self.close_connection(sock)

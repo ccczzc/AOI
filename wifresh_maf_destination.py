@@ -117,7 +117,7 @@ class WiFreshMAFDestination:
                 current_time = time.time()
                 response = f"TIME_RESPONSE:{current_time:010.15f}:{source_time:010.15f}"
                 self.sock.sendto(response.encode(), addr)
-                print(f"Sent TIME_RESPONSE to {addr}: {current_time}")
+                # print(f"Sent TIME_RESPONSE to {addr}: {current_time}")
             else:
                 # Assuming the type can be inferred from the data_structed
                 source_type = data_structed.data_type

@@ -10,7 +10,7 @@ class WiFiTCPFcfsSource:
         self, 
         listen_port, 
         destination_address,
-        source_id,          # New parameter
+        source_id,          # For identifying the source
         sensor_list: List[Sensor],
         sync_interval=5,
         sync_rounds=5,
@@ -67,9 +67,9 @@ class WiFiTCPFcfsSource:
         try:
             data = self.sock.recv(4096)
             if data:
-                # 将接收到的数据添加到缓冲区
+                # Add received data to the buffer
                 self.recv_buffer.extend(data)
-                # 处理缓冲区中的完整消息
+                # Process complete messages in the buffer
                 self.process_buffer()
             else:
                 print("Received empty data, reconnecting...")
@@ -85,17 +85,17 @@ class WiFiTCPFcfsSource:
     def process_buffer(self):
         while True:
             if len(self.recv_buffer) < 4:
-                # 不足以读取长度前缀
+                # Not enough data to read the length prefix
                 break
             total_length = struct.unpack('>I', self.recv_buffer[:4])[0]
             if len(self.recv_buffer) < 4 + total_length:
-                # 数据未接收完整
+                # Data not fully received
                 break
-            # 提取完整的消息
+            # Extract the complete message
             message_bytes = self.recv_buffer[:4 + total_length]
-            # 更新缓冲区，移除已处理的消息
+            # Update the buffer, removing the processed message
             self.recv_buffer = self.recv_buffer[4 + total_length:]
-            # 处理消息
+            # Process the message
             data_str = message_bytes[4:].decode()
             self.process_time_response(data_str)
 
