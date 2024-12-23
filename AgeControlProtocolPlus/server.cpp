@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 #define MYPORT "49050"
-#define MAXBUFLEN 2048 // Ok?
+#define MAXBUFLEN 2048 * 2048 // Ok?
 
 struct timespec currentTime, startTime;
 
@@ -72,7 +72,7 @@ unsigned char *package(unsigned int seq) {
   return data;
 }
 
-unsigned int unpack(unsigned char buffer[]) {
+unsigned int unpack(unsigned char buffer[], double *timestamp = nullptr) {
   unsigned int l1, l2, l3, l4;
 
   l1 = (unsigned int)buffer[0];
@@ -81,6 +81,8 @@ unsigned int unpack(unsigned char buffer[]) {
   l4 = (unsigned int)buffer[3];
 
   unsigned int sq = (l1 << 24) + (l2 << 16) + (l3 << 8) + l4;
+
+  memcpy(timestamp, buffer + 4, sizeof(double));
 
   return sq;
 }
@@ -138,7 +140,7 @@ int main(void) {
   if (clock_gettime(CLOCK_REALTIME, &startTime) == -1) {
     printf("error\n");
   }
-  fileServerLog << "Seq;Time;Timestamp;PacketSize\n";
+  fileServerLog << "Seq;CurrentTimestamp;Timestamp;IP;Port;PacketSize\n";
 
   do {
     memset(buf, 0, sizeof(buf)); // might not be needed
@@ -151,15 +153,25 @@ int main(void) {
       exit(1);
     }
 
-    seq = unpack(buf); // get the sequence number as int from packet
+    double recvTimestamp = 0.0;
+    seq = unpack(buf, &recvTimestamp);
+
+    char remoteIP[INET6_ADDRSTRLEN];
+    inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr),
+              remoteIP, sizeof(remoteIP));
+    uint16_t remotePort = ntohs(((struct sockaddr_in *)&their_addr)->sin_port);
 
     if (clock_gettime(CLOCK_REALTIME, &currentTime) == -1) {
       printf("error\n");
     }
-    fileServerLog.setf(std::ios::fixed );
-    fileServerLog<< seq << ";"
-                  << getDoubleTimeDiff(&startTime, &currentTime) << ";"
-                  << getDoubleTime(currentTime) << ";" << numbytes << "\n";
+
+    // fileServerLog << seq << ";" << getDoubleTimeDiff(&startTime,
+    // &currentTime) << ";" << getDoubleTime(currentTime) << ";" << numbytes <<
+    // "\n";
+    fileServerLog.setf(std::ios::fixed);
+    fileServerLog << seq << ";" << getDoubleTime(currentTime) << ";"
+                  << recvTimestamp << ";" << remoteIP << ";" << remotePort
+                  << ";" << numbytes << "\n";
 
     // outputs reciving a packet
     /*printf("listener: got packet from %s\n",
@@ -180,8 +192,8 @@ int main(void) {
     }
     free(packet);
 
-    // if(getDoubleTimeDiff(&startTime,&currentTime)>=500.0)
-    // break;
+    if (getDoubleTimeDiff(&startTime, &currentTime) >= 603.0)
+      break;
 
   } while (true);
 

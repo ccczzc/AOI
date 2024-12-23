@@ -33,9 +33,8 @@ Following are the steps to run the codes in this repository :
 - Run **server** on a machine and pass a port number along with it
 	``` ./server $port ```
 
- - Run **client** on a different machine and pass a port number along with it. You can run the ACP and baseline on a single machine. 
-	``` ./client_acp $serverIP $packetSize $numPackets 2 $stepSize $port ```  
-	``` ./client_baseline $serverIP $packetSize $numPackets 2 $port ```
+ - Run **client** on a different machine and pass a port number along with it.
+	``` ./client_acp $serverIP $packetSize $packetRate 2 $stepSize $serverPort listenPort```  
 
 >Flags: 
 >$serverIP&rarr; IP address of ACP+ server  

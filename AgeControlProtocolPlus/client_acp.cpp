@@ -19,6 +19,14 @@
 #include <chrono>
 #include <thread>
 
+#include <condition_variable>
+#include <queue>
+
+// Create a queue to store messages
+std::queue<unsigned char *> messageQueue;
+std::mutex queueMutex;
+std::condition_variable queueCondVar;
+
 // #define SERVERPORT "49050"
 #define MAXBUFLEN 2048 // Ok?
 #define ITERATIONS 500000
@@ -87,17 +95,17 @@ time_t backlogTime_local[local_size] = {0};
 double globalBacklog_local[local_size] = {0};
 
 // Log files opening these files in overwite(out) append state is app
-ofstream fileOOOLog("Log/Out_of_Order_log.txt", ios::out);
-ofstream fileTxLog("Log/Tx_log.txt", ios::out);
-ofstream fileArrLog("Log/Arrival_log.txt", ios::out);
-ofstream fileYLog("Log/Y_log.txt", ios::out);
-ofstream fileAgeEst("Log/Age_Est.txt", ios::out);
-ofstream fileintArrLog("Log/intArr_log.txt", ios::out);
-ofstream filecontrol("Log/control_log.txt", ios::out);
-ofstream filebacklogArr("Log/backlog_arrival.txt", ios::out);
-ofstream filelambdaLog("Log/lambdaLog.txt", ios::out);
-ofstream fileAvgbacklog("Log/Avg_backlog.txt", ios::out);
-ofstream fileDebugAge("Log/debug_age.txt", ios::out);
+ofstream fileOOOLog;
+ofstream fileTxLog;
+ofstream fileArrLog;
+ofstream fileYLog;
+ofstream fileAgeEst;
+ofstream fileintArrLog;
+ofstream filecontrol;
+ofstream filebacklogArr;
+ofstream filelambdaLog;
+ofstream fileAvgbacklog;
+ofstream fileDebugAge;
 
 void timespec_diff(struct timespec *start, struct timespec *stop,
                    struct timespec *result) {
@@ -413,9 +421,9 @@ static void *controlAction(void *x1) {
 
   filecontrol << getDoubleTimeNow() << "\t" << recent_age_estimate << "\t"
               << prev_age_estimate << "\t" << changeinBacklog << "\t"
-              << current_action << "\t" << "\t" << stepSize
-              << currentControlTime << "\t" << depTime_local << "\t"
-              << controlIndex << "\t" << std::endl;
+              << current_action << "\t"
+              << "\t" << stepSize << currentControlTime << "\t" << depTime_local
+              << "\t" << controlIndex << "\t" << std::endl;
 
   prev_age_estimate = recent_age_estimate;
 
@@ -446,7 +454,8 @@ static void *controlAction(void *x1) {
 
 unsigned char *package(unsigned int seq) {
 
-  unsigned char *data = (unsigned char *)malloc(1024 * sizeof(unsigned char));
+  unsigned char *data =
+      (unsigned char *)malloc(1024 * 20 * sizeof(unsigned char));
 
   unsigned int n1 = seq >> 24;
   unsigned int n2 = (seq >> 16) & 0xff;
@@ -457,6 +466,16 @@ unsigned char *package(unsigned int seq) {
   data[1] = (unsigned char)n2;
   data[2] = (unsigned char)n3;
   data[3] = (unsigned char)n4;
+
+  // Get current timestamp
+  struct timespec current_time;
+  clock_gettime(CLOCK_REALTIME, &current_time);
+
+  double timestamp =
+      (double)current_time.tv_sec + (double)current_time.tv_nsec / 1e9;
+
+  // Pack timestamp into data[4..11]
+  memcpy(&data[4], &timestamp, sizeof(double));
 
   return data;
 }
@@ -566,7 +585,7 @@ void *Receiver(void *sock) {
     }
     controlPacketDelay[controlIndex] = received_delay[receiver_seq - 1];
     controlIndex++; //@tanyas: Unlike simulator, where function call and
-                    //calculation is instantaneous, things arent same in real.
+                    // calculation is instantaneous, things arent same in real.
                     // New packets are arriving while control action code is
                     // being executed leading to increments in controlIndex.
 
@@ -613,8 +632,23 @@ time_t ping_to_get_rtt(int sockfd, struct addrinfo *p) {
       exit(1);
     }
     rtt_total += (recv_time - send_time);
-  } // for
+  }                          // for
   return rtt_total / seqNum; // avg RTT
+}
+
+// Producer thread to generate messages at message_rate
+void messageProducer(double message_rate) {
+  unsigned int seqNum = 1;
+  while (true) {
+    unsigned char *packet = package(seqNum++);
+    {
+      std::lock_guard<std::mutex> lock(queueMutex);
+      messageQueue.push(packet);
+    }
+    queueCondVar.notify_one();
+    std::this_thread::sleep_for(
+        std::chrono::nanoseconds(static_cast<long long>(1e9 / message_rate)));
+  }
 }
 
 int main(int argc, char *argv[]) {
@@ -638,11 +672,24 @@ int main(int argc, char *argv[]) {
   rx = (struct timespec *)malloc(ITERATIONS * sizeof(struct timespec));
   systemTime = (time_t *)malloc(ITERATIONS * sizeof(time_t));
 
-  if (argc != 7) {
-    fprintf(stderr, "Usage: talker hostname message_bytes num_messages "
-                    "inter_arrival_time stepSize port\n");
+  if (argc != 8) {
+    fprintf(stderr, "Usage: talker hostname message_bytes message_rate "
+                    "inter_arrival_time step_size server_port client_port\n");
     exit(1);
   }
+
+  std::string clientPort = argv[7];
+  fileOOOLog.open("Log/Out_of_Order_log_" + clientPort + ".txt", ios::out);
+  fileTxLog.open("Log/Tx_log_" + clientPort + ".txt", ios::out);
+  fileArrLog.open("Log/Arrival_log_" + clientPort + ".txt", ios::out);
+  fileYLog.open("Log/Y_log_" + clientPort + ".txt", ios::out);
+  fileAgeEst.open("Log/Age_Est_" + clientPort + ".txt", ios::out);
+  fileintArrLog.open("Log/intArr_log_" + clientPort + ".txt", ios::out);
+  filecontrol.open("Log/control_log_" + clientPort + ".txt", ios::out);
+  filebacklogArr.open("Log/backlog_arrival_" + clientPort + ".txt", ios::out);
+  filelambdaLog.open("Log/lambdaLog_" + clientPort + ".txt", ios::out);
+  fileAvgbacklog.open("Log/Avg_backlog_" + clientPort + ".txt", ios::out);
+  fileDebugAge.open("Log/debug_age_" + clientPort + ".txt", ios::out);
 
   SERVERPORT = argv[6];
 
@@ -655,6 +702,14 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  int message_bytes = stoi(argv[2]);
+  if (message_bytes < 4) {
+    printf("Too less bytes. I need minimum 4");
+    exit(1);
+  }
+  printf("Message bytes %d\n", message_bytes);
+
+  double message_rate = stod(argv[3]);
   // loop through all the results and make a socket
   for (p = servinfo; p != NULL; p = p->ai_next) {
     if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
@@ -668,6 +723,27 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "talker: failed to create socket\n");
     return 2;
   }
+
+  // After creating sockfd, add the following:
+
+  struct addrinfo hints_client, *clientinfo = NULL;
+  memset(&hints_client, 0, sizeof(hints_client));
+  hints_client.ai_family = AF_UNSPEC;
+  hints_client.ai_socktype = SOCK_DGRAM;
+  hints_client.ai_flags = AI_PASSIVE;
+
+  int rc2 = getaddrinfo(NULL, clientPort.c_str(), &hints_client, &clientinfo);
+  if (rc2 != 0) {
+    fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rc2));
+    exit(1);
+  }
+
+  if (bind(sockfd, clientinfo->ai_addr, clientinfo->ai_addrlen) == -1) {
+    perror("bind");
+    exit(1);
+  }
+
+  freeaddrinfo(clientinfo);
 
   printf("Before ping\n");
   interRate = 1e9 / ping_to_get_rtt(sockfd, p);
@@ -693,8 +769,10 @@ int main(int argc, char *argv[]) {
   stepSize = stepSize_arg / 100.0;
   printf("Step Size %f", stepSize);
 
+  std::thread producerThread(messageProducer, message_rate);
+
   // seqNum is m_packetsSent
-  for (int seqNum = 1; seqNum <= stoi(argv[3]); seqNum++) { // message_num times
+  for (int seqNum = 0;; seqNum++) { // message_num times
 
     // static int scheduleTime=stoi(argv[4]);//inter arrival time
     mtx.lock();
@@ -708,26 +786,31 @@ int main(int argc, char *argv[]) {
     // int)arrivalTime*1000000000));
     this_thread::sleep_for(chrono::nanoseconds(arrivalTime));
 
-    unsigned char *packet = package((unsigned)seqNum);
-    cout << "sending a packet seq:" << (unsigned)seqNum << " of length "
-         << sizeof(seqNum) << "\n";
+    unsigned char *packet = nullptr;
+    {
+      std::unique_lock<std::mutex> lock(queueMutex);
+      if (messageQueue.empty()) {
+        // 等待消息到达
+        queueCondVar.wait(lock, [] { return !messageQueue.empty(); });
+      }
+      packet = messageQueue.front();
+      messageQueue.pop();
+    }
 
     // if ((numbytes_new = sendto(sockfd_new, packet, sizeof(packet)/2, 0,
     // //strlen((char *)packet) does not give size
-    if (stoi(argv[2]) < 4) {
-      printf("Too less bytes. I need minimum 4");
-      exit(1);
-    }
 
     if (clock_gettime(CLOCK_REALTIME, &tx[seqNum]) == -1) {
       printf("error\n");
     }
     cout << "send to file descriptor" << sockfd << endl;
-    if ((numbytes_new = sendto(sockfd, packet, stoi(argv[2]), 0, p->ai_addr,
+    if ((numbytes_new = sendto(sockfd, packet, message_bytes, 0, p->ai_addr,
                                p->ai_addrlen)) == -1) {
       perror("talker2: sendto");
       exit(1);
     }
+    cout << "sending a packet seq:" << (unsigned)seqNum << ", sent length of "
+         << numbytes_new << "\n";
 
     // printf("Entering sender Block\n");
     // PACKET SENT
